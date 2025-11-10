@@ -92,9 +92,16 @@ def geojson_to_dataframe(geojson_bytes):
     df["latitude"] = gdf.geometry.y
     return df
 
+st.set_page_config(
+    page_title="Excellent JSON",   # 🔹 browser tab title
+    page_icon="🗺️",                          # 🔹 emoji or image path
+    layout="wide",                            # optional: "centered" or "wide"
+    initial_sidebar_state="expanded"          # optional
+)
 
+st.title("🗺️ Excel → GeoJSON Converter")
+st.write("Welcome to your conversion dashboard!")
 login()
-st.title("🗺️ Excel → GeoJSON → GitHub CDN")
 
 uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 if uploaded_file:
