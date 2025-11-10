@@ -83,6 +83,16 @@ def convert_to_geojson(uploaded_file):
 # Streamlit UI
 # --------------------------
 
+def geojson_to_dataframe(geojson_bytes):
+    """Converts a GeoJSON byte string into a pandas DataFrame."""
+    geojson = json.loads(geojson_bytes.decode("utf-8"))
+    gdf = gpd.GeoDataFrame.from_features(geojson["features"])
+    df = pd.DataFrame(gdf.drop(columns="geometry"))
+    df["longitude"] = gdf.geometry.x
+    df["latitude"] = gdf.geometry.y
+    return df
+
+
 login()
 st.title("🗺️ Excel → GeoJSON → GitHub CDN")
 
@@ -90,6 +100,19 @@ uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 if uploaded_file:
     geojson_bytes = convert_to_geojson(uploaded_file)
     if geojson_bytes:
-        filename = st.text_input("GitHub Filename (e.g. data/converted.geojson)", "converted.geojson")
+        st.success("✅ Successfully converted to GeoJSON!")
+        
+        # Show table preview
+        st.subheader("📋 GeoJSON Data Table")
+        df = geojson_to_dataframe(geojson_bytes)
+        st.dataframe(df, use_container_width=True)
+        
+        # Optional: Map preview
+        if st.checkbox("Show map preview"):
+            st.map(df[["latitude", "longitude"]])
+    
+        # Upload to GitHub (as before)
+        filename = st.text_input("GitHub Filename", "converted.geojson")
         if st.button("🚀 Upload to GitHub"):
             upload_to_github(geojson_bytes, filename)
+
