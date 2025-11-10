@@ -79,6 +79,13 @@ def convert_to_geojson(uploaded_file):
     geojson_bytes = gdf.to_json().encode("utf-8")
     return geojson_bytes
 
+
+def prettify_numbers(df):
+    """Convert float values like 8.0 → 8 for all columns in a DataFrame."""
+    for col in df.select_dtypes(include=["float", "int"]).columns:
+        df[col] = df[col].apply(lambda x: int(x) if pd.notnull(x) and x == int(x) else x)
+    return df
+
 # --------------------------
 # Streamlit UI
 # --------------------------
@@ -112,6 +119,7 @@ if uploaded_file:
         # Show table preview
         st.subheader("📋 GeoJSON Data Table")
         df = geojson_to_dataframe(geojson_bytes)
+        df = prettify_numbers(df)
         st.dataframe(df, use_container_width=True)
         
         # Optional: Map preview
