@@ -3,132 +3,73 @@ import pandas as pd
 import geopandas as gpd
 from shapely.geometry import shape
 import json
+import base64
+import requests
 from io import BytesIO
 
-# ----------------------------
-# Helper Functions
-# ----------------------------
+# --------------------------
+# GitHub Upload Function
+# --------------------------
 
-def replace_commas_with_dots_excel(data):
-    for column in data.columns:
-        if data[column].dtype in ['float64', 'int64']:
-            data[column] = data[column].apply(lambda x: str(x).replace(',', '.') if isinstance(x, str) else x)
-    return data
+def upload_to_github(file_bytes, filename):
+    """Uploads GeoJSON file to a GitHub repository using REST API."""
+    token = st.secrets["GITHUB_TOKEN"]
+    username = st.secrets["GITHUB_USERNAME"]
+    repo = st.secrets["GITHUB_REPO"]
+    branch = st.secrets.get("GITHUB_BRANCH", "main")
 
-def replace_commas_with_dots(geo_data, numeric_columns):
-    for column in numeric_columns:
-        if column in geo_data.columns:
-            geo_data[column] = geo_data[column].astype(str).replace({',': '.'}, regex=True)
-    return geo_data
+    # Build GitHub API endpoint
+    url = f"https://api.github.com/repos/{username}/{repo}/contents/{filename}"
 
-# ----------------------------
+    # Get SHA if file exists (needed for overwrite)
+    headers = {"Authorization": f"token {token}"}
+    get_resp = requests.get(url, headers=headers, params={"ref": branch})
+    sha = get_resp.json().get("sha") if get_resp.status_code == 200 else None
+
+    # Prepare upload payload
+    message = "Update GeoJSON via Streamlit app"
+    content = base64.b64encode(file_bytes).decode("utf-8")
+    data = {"message": message, "content": content, "branch": branch}
+    if sha:
+        data["sha"] = sha
+
+    # Send PUT request to GitHub API
+    resp = requests.put(url, headers=headers, data=json.dumps(data))
+
+    if resp.status_code in [200, 201]:
+        st.success("✅ File uploaded to GitHub successfully!")
+        cdn_url = f"https://cdn.jsdelivr.net/gh/{username}/{repo}/{filename}"
+        st.markdown(f"**Public CDN URL:** [📎 {cdn_url}]({cdn_url})")
+    else:
+        st.error(f"❌ GitHub upload failed: {resp.status_code} - {resp.text}")
+
+
+# --------------------------
 # Excel → GeoJSON Conversion
-# ----------------------------
+# --------------------------
 
 def convert_to_geojson(uploaded_file):
-    excel_data = pd.read_excel(uploaded_file)
-    numeric_columns = ['GesamthoeheM', "KEV-Liste", "Rotordurchmesser", 'TotalTurbinen', "MW", "GWhA"]
-    
-    for column in numeric_columns:
-        if column in excel_data.columns:
-            excel_data[column] = pd.to_numeric(excel_data[column], errors='coerce')
-
-    if "Kanton" in excel_data.columns:
-        excel_data["Kanton"] = excel_data["Kanton"].fillna("").apply(
-            lambda x: [k.strip() for k in x.split(",")] if isinstance(x, str) and x.strip() else []
-        )
-
-    excel_data = replace_commas_with_dots_excel(excel_data)
-    excel_data = excel_data.fillna("")
-
-    # Convert WKT to geometry if available
-    if "geometry" in excel_data.columns:
-        excel_data["geometry"] = gpd.GeoSeries.from_wkt(excel_data["geometry"])
-        geo_data = gpd.GeoDataFrame(excel_data, geometry=excel_data["geometry"])
-    else:
-        st.warning("No 'geometry' column found in Excel file.")
+    df = pd.read_excel(uploaded_file)
+    if "geometry" not in df.columns:
+        st.error("Excel must contain a 'geometry' column in WKT format.")
         return None
 
-    geojson_bytes = geo_data.to_json().encode('utf-8')
+    df["geometry"] = gpd.GeoSeries.from_wkt(df["geometry"])
+    gdf = gpd.GeoDataFrame(df, geometry="geometry")
+
+    geojson_bytes = gdf.to_json().encode("utf-8")
     return geojson_bytes
 
-# ----------------------------
-# GeoJSON → Excel Conversion
-# ----------------------------
-
-def convert_geojson_to_excel(uploaded_file):
-    raw = json.load(uploaded_file)
-    records = []
-    for feature in raw["features"]:
-        props = feature["properties"]
-        geometry = shape(feature["geometry"])
-        props["geometry"] = geometry
-        records.append(props)
-
-    geo_data = gpd.GeoDataFrame(records, geometry="geometry")
-
-    def join_kanton(val):
-        if isinstance(val, list):
-            return ", ".join(val)
-        elif val is None:
-            return ""
-        return str(val)
-
-    if "Kanton" in geo_data.columns:
-        geo_data["Kanton"] = geo_data["Kanton"].apply(join_kanton)
-
-    numeric_columns = ['GesamthoeheM', "KEV-Liste", "Rotordurchmesser", 'TotalTurbinen', "MW", "GWhA"]
-    geo_data = replace_commas_with_dots(geo_data, numeric_columns)
-
-    geo_data['lat'] = geo_data['geometry'].apply(lambda x: x.y if x else None)
-    geo_data['lon'] = geo_data['geometry'].apply(lambda x: x.x if x else None)
-
-    for column in numeric_columns:
-        if column in geo_data.columns:
-            geo_data[column] = pd.to_numeric(geo_data[column], errors='coerce')
-
-    output = BytesIO()
-    geo_data.to_excel(output, index=False)
-    output.seek(0)
-    return output
-
-# ----------------------------
+# --------------------------
 # Streamlit UI
-# ----------------------------
+# --------------------------
 
-st.set_page_config(page_title="Excel ↔ GeoJSON Converter", page_icon="🗺️", layout="centered")
-st.title("🗺️ Excel ↔ GeoJSON Converter")
-st.write("Upload your Excel or GeoJSON file to convert between formats.")
+st.title("🗺️ Excel → GeoJSON → GitHub CDN")
 
-tab1, tab2 = st.tabs(["📄 Excel → GeoJSON", "🌍 GeoJSON → Excel"])
-
-# --- Excel to GeoJSON ---
-with tab1:
-    excel_file = st.file_uploader("Upload Excel File (.xlsx)", type=["xlsx"])
-    if excel_file:
-        geojson_bytes = convert_to_geojson(excel_file)
-        if geojson_bytes:
-            st.success("✅ Successfully converted to GeoJSON!")
-            st.download_button(
-                label="⬇️ Download GeoJSON",
-                data=geojson_bytes,
-                file_name="converted.geojson",
-                mime="application/geo+json"
-            )
-
-# --- GeoJSON to Excel ---
-with tab2:
-    geojson_file = st.file_uploader("Upload GeoJSON File (.json, .geojson)", type=["json", "geojson"])
-    if geojson_file:
-        excel_output = convert_geojson_to_excel(geojson_file)
-        if excel_output:
-            st.success("✅ Successfully converted to Excel!")
-            st.download_button(
-                label="⬇️ Download Excel File",
-                data=excel_output,
-                file_name="converted.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-st.markdown("---")
-st.caption("Built with ❤️ using Streamlit and GeoPandas")
+uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+if uploaded_file:
+    geojson_bytes = convert_to_geojson(uploaded_file)
+    if geojson_bytes:
+        filename = st.text_input("GitHub Filename (e.g. data/converted.geojson)", "converted.geojson")
+        if st.button("🚀 Upload to GitHub"):
+            upload_to_github(geojson_bytes, filename)
