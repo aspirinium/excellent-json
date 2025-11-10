@@ -11,6 +11,25 @@ from io import BytesIO
 # GitHub Upload Function
 # --------------------------
 
+
+def login():
+    """Simple password login stored in Streamlit secrets."""
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if not st.session_state.authenticated:
+        st.title("🔐 Login Required")
+
+        password = st.text_input("Enter password", type="password")
+        if st.button("Login"):
+            if password == st.secrets["APP_PASSWORD"]:
+                st.session_state.authenticated = True
+                st.success("✅ Login successful")
+            else:
+                st.error("❌ Incorrect password")
+        st.stop()  # Prevent rest of app from running
+
+
 def upload_to_github(file_bytes, filename):
     """Uploads GeoJSON file to a GitHub repository using REST API."""
     token = st.secrets["GITHUB_TOKEN"]
@@ -64,6 +83,7 @@ def convert_to_geojson(uploaded_file):
 # Streamlit UI
 # --------------------------
 
+login()
 st.title("🗺️ Excel → GeoJSON → GitHub CDN")
 
 uploaded_file = st.file_uploader("Upload Excel File", type=["xlsx"])
