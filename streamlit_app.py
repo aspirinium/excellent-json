@@ -57,7 +57,7 @@ def upload_to_github(file_bytes, filename):
 
     if resp.status_code in [200, 201]:
         st.success("✅ File uploaded to GitHub successfully!")
-        cdn_url = f"https://cdn.jsdelivr.net/gh/{username}/{repo}/{filename}"
+        cdn_url = f"https://raw.githubusercontent.com/{username}/{repo}/{branch}/{filename}"
         st.markdown(f"**Public CDN URL:** [📎 {cdn_url}]({cdn_url})")
     else:
         st.error(f"❌ GitHub upload failed: {resp.status_code} - {resp.text}")
